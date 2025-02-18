@@ -8,7 +8,7 @@ let browser;
  */
 const launchBrowser = async () => {
   if (!browser) {
-    browser = await puppeteer.launch({ headless: false });
+    browser = await puppeteer.launch({ headless: true });
   }
   return browser;
 };
@@ -54,6 +54,8 @@ const extractStatGenLog = async (page, stat) => {
   }, stat);
 };
 
+
+
 /**
  * Processes player statistics.
  * @param {puppeteer.Browser} browser - Puppeteer browser instance.
@@ -65,107 +67,110 @@ const processPlayer = async (browser, team, player) => {
     const playerURL = await getPlayerGameLogUrl(browser, team, player);
     if (!playerURL) {
       console.error(`Player ${player} not found.`);
-      return;
+      return null; // Return null to prevent further errors
     }
 
     const page = await browser.newPage();
     await page.goto(playerURL, { waitUntil: 'domcontentloaded' });
 
-    // Stats to extract from general game log
     const statsToExtract = [
-      "pts", "fga", "fg3a", "fta", "fg_pct", "fg3_pct", "ft_pct",
+      "pts", "ast", "trb", "orb", "drb", "stl", "blk", "tov", "pf", "game_score",
+      "fga", "fg3a", "fta", "fg_pct", "fg3_pct", "ft_pct",
       "opp_id", "mp", "game_season", "date_game", "game_location"
     ];
 
-    const extractedStats = await Promise.all(statsToExtract.map(stat => extractStatGenLog(page, stat)));
+    // Attempt to extract all stats safely
+    const extractedStats = await Promise.all(
+      statsToExtract.map(async (stat) => {
+        try {
+          return await extractStatGenLog(page, stat) ?? null; // Avoid undefined values
+        } catch (error) {
+          console.error(`Error extracting ${stat} for ${player}:`, error);
+          return null;
+        }
+      })
+    );
 
-    let [points, fga, fg3a, fta, fgPct, fg3Pct, ftPct, oppTeams, minutesPlayed, gameNumbers, gameDates, gameLocations] = extractedStats;
+    // Ensure extractedStats is properly populated
+    if (extractedStats.includes(undefined)) {
+      console.error(`Failed to extract stats for ${player}.`);
+      await page.close();
+      return null;
+    }
+
+    let [
+      pts, ast, trb, orb, drb, stl, blk, tov, pf, game_score,
+      fga, fg3a, fta, fgPct, fg3Pct, ftPct,
+      opp_teams, minutes_played, game_numbers, game_dates, game_locations
+    ] = extractedStats;
 
     // Clean data by filtering out invalid games
-    const validIndices = gameNumbers.map((num, index) => num !== '' ? index : null).filter(i => i !== null);
-    const cleanData = arr => validIndices.map(i => arr[i]);
+    if (!game_numbers || !Array.isArray(game_numbers)) {
+      console.error(`Invalid game numbers for ${player}`);
+      await page.close();
+      return null;
+    }
 
-    gameNumbers = cleanData(gameNumbers);
-    oppTeams = cleanData(oppTeams);
-    gameDates = cleanData(gameDates);
-    gameLocations = cleanData(gameLocations).map(loc => (loc === '@' ? 'Away' : 'Home'));
+    const validIndices = game_numbers.map((num, index) => num !== '' ? index : null).filter(i => i !== null);
+    const cleanData = arr => validIndices.map(i => arr[i] ?? null);
+
+    game_numbers = cleanData(game_numbers);
+    opp_teams = cleanData(opp_teams);
+    game_dates = cleanData(game_dates);
+    game_locations = cleanData(game_locations).map(loc => (loc === '@' ? 'Away' : 'Home'));
 
     // Navigate to advanced stats page
     await page.goto(playerURL.replace("gamelog", "gamelog-advanced"), { waitUntil: 'domcontentloaded' });
 
-    const [usgPct, PlayerOR] = await Promise.all([
-      extractStatGenLog(page, "usg_pct"),
-      extractStatGenLog(page, "off_rtg")
+    const [usg_pct, player_or] = await Promise.all([
+      
+      extractStatGenLog(page, "usg_pct").catch(() => null),
+      extractStatGenLog(page, "off_rtg").catch(() => null)
     ]);
 
-
-    await page.close(); // Ensure the page is closed after processing
+    await page.close();
 
     return {
       player,
       team,
-      points,
-      fga,
-      fg3a,
-      fta,
-      fgPct,
-      fg3Pct,
-      ftPct,
-      oppTeams,
-      minutesPlayed,
-      gameNumbers,
-      gameDates,
-      gameLocations,
-      usgPct,
-      PlayerOR
+      pts, ast, trb, orb, drb, stl, blk, tov, pf, game_score,
+      fga, fg3a, fta, fgPct, fg3Pct, ftPct,
+      opp_teams, minutes_played, game_numbers, game_dates, game_locations,
+      usg_pct, player_or
     };
 
-
   } catch (error) {
-    console.error(`Error processing player ${Player}:`, error);
+    console.error(`Error processing player ${player}:`, error);
+    return null;
   }
 };
 
-
-/**
- * Runs the scraping process.
- */
 const run = async () => {
   const browser = await launchBrowser();
 
-  
-    //add promise
+  try {
+    const players = [
+      { team: "LAL", name: "LeBron James" },
+      { team: "LAL", name: "Dalton Knecht" }
+    ];
 
-    const lebronStats = await processPlayer(browser, "LAL", "LeBron James");
-    const knechtStats = await processPlayer(browser, "LAL", "Dalton Knecht");
-  
-    console.log(lebronStats.gameLocations);
-    console.log(knechtStats.gameLocations);
-  
+    const playerStats = await Promise.all(
+      players.map(({ team, name }) => processPlayer(browser, team, name))
+    );
 
-  // Ensure all player processes are awaited
-    //processPlayer(browser, "LAL", "LeBron James"),
-    //processPlayer(browser, "LAL", "Dalton Knecht"),
-    /*
-    processPlayer(browser, "LAL", "Austin Reaves"),
-    processPlayer(browser, "LAL", "Rui Hachimura"),
-    processPlayer(browser, "LAL", "Gabe Vincent"),
-    processPlayer(browser, "LAL", "Jaxson Hayes"),
-    processPlayer(browser, "LAL", "Cam Reddish"),
-    processPlayer(browser, "LAL", "Dorian Finney-Smith"),
-    processPlayer(browser, "LAL", "Shake Milton"),
-    processPlayer(browser, "LAL", "Jarred Vanderbilt"),
-    processPlayer(browser, "LAL", "Markieff Morris"),
-    processPlayer(browser, "LAL", "Luka Dončić"),
-    processPlayer(browser, "LAL", "Alex Len"),
-    */
+    playerStats.forEach(stats => {
+      if (stats) {
+        console.log(`${stats.usg_pct}`);
+      } else {
+        console.log(`Failed to retrieve stats for a player.`);
+      }
+    });
 
-    
-
-
-
-  await browser.close(); // Close browser after all processes finish
+  } catch (error) {
+    console.error("Error running script:", error);
+  } finally {
+    await browser.close();
+  }
 };
 
 run();
-
