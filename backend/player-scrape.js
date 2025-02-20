@@ -79,6 +79,12 @@ const processPlayer = async (browser, team, player) => {
       "opp_id", "mp", "game_season", "date_game", "game_location"
     ];
 
+    const advStatsToExtract = [
+      "ts_pct", "efg_pct", "orb_pct", "drb_pct", "trb_pct", "ast_pct", 
+      "stl_pct", "blk_pct", "tov_pct", "usg_pct", "off_rtg", "def_rtg", 
+      "gmsc", "bpm"
+    ];
+
     // Attempt to extract all stats safely
     const extractedStats = await Promise.all(
       statsToExtract.map(async (stat) => {
@@ -119,14 +125,25 @@ const processPlayer = async (browser, team, player) => {
     game_dates = cleanData(game_dates);
     game_locations = cleanData(game_locations).map(loc => (loc === '@' ? 'Away' : 'Home'));
 
-    // Navigate to advanced stats page
     await page.goto(playerURL.replace("gamelog", "gamelog-advanced"), { waitUntil: 'domcontentloaded' });
 
-    const [usg_pct, player_or] = await Promise.all([
-      
-      extractStatGenLog(page, "usg_pct").catch(() => null),
-      extractStatGenLog(page, "off_rtg").catch(() => null)
-    ]);
+    // Extract advanced stats separately
+    const extractedAdvStats = await Promise.all(
+      advStatsToExtract.map(async (stat) => {
+        try {
+          return await extractStatGenLog(page, stat) ?? null;
+        } catch (error) {
+          console.error(`Error extracting ${stat} for ${player}:`, error);
+          return null;
+        }
+      })
+    );
+    
+    let [
+      ts_pct, efg_pct, orb_pct, drb_pct, trb_pct, ast_pct, 
+      stl_pct, blk_pct, tov_pct, usg_pct, off_rtg, def_rtg, 
+      gmsc, bpm
+    ] = extractedAdvStats;
 
     await page.close();
 
@@ -136,7 +153,8 @@ const processPlayer = async (browser, team, player) => {
       pts, ast, trb, orb, drb, stl, blk, tov, pf, game_score,
       fga, fg3a, fta, fgPct, fg3Pct, ftPct,
       opp_teams, minutes_played, game_numbers, game_dates, game_locations,
-      usg_pct, player_or
+      usg_pct, off_rtg, ts_pct, efg_pct, orb_pct, drb_pct, trb_pct, ast_pct, 
+      stl_pct, blk_pct, tov_pct, def_rtg, gmsc, bpm
     };
 
   } catch (error) {
@@ -150,7 +168,7 @@ const run = async () => {
 
   try {
     const players = [
-      { team: "LAL", name: "LeBron James" },
+      { team: "CHI", name: "LeBron James" },
       { team: "LAL", name: "Dalton Knecht" }
     ];
 
@@ -160,7 +178,7 @@ const run = async () => {
 
     playerStats.forEach(stats => {
       if (stats) {
-        console.log(`${stats.usg_pct}`);
+        console.log(`${stats.off_rtg}`);
       } else {
         console.log(`Failed to retrieve stats for a player.`);
       }
@@ -174,3 +192,6 @@ const run = async () => {
 };
 
 run();
+
+//get team def rating
+//add get roaster > do in get game function import both teams, then add injury variable which will remove a player and it will process both teams 
