@@ -1,4 +1,8 @@
+
+
+
 import puppeteer from 'puppeteer';
+
 
 let browser;
 
@@ -8,7 +12,7 @@ let browser;
  */
 const launchBrowser = async () => {
   if (!browser) {
-    browser = await puppeteer.launch({ headless: true });
+    browser = await puppeteer.launch({ headless: false });
   }
   return browser;
 };
@@ -20,21 +24,26 @@ const launchBrowser = async () => {
  * @param {string} player - The full name of the player (e.g., "LeBron James").
  * @returns {Promise<string|null>} - Returns the player's game log URL or null if not found.
  */
-const getPlayerGameLogUrl = async (browser, team, player) => {
+const getPlayerGameLogUrl = async (browser, team) => {
   try {
     const page = await browser.newPage();
     const teamURL = `https://www.basketball-reference.com/teams/${team.toUpperCase()}/2025.html`;
 
     await page.goto(teamURL, { waitUntil: 'domcontentloaded' });
 
-    const playerURL = await page.evaluate((playerName) => {
-      const players = [...document.querySelectorAll("#roster tbody tr td:nth-child(2) a")];
-      const playerElement = players.find(el => el.textContent.trim() === playerName);
-      return playerElement ? playerElement.href.replace(".html", "/gamelog/2025") : null;
-    }, player);
+    // Extract all player names and URLs from the roster table
+    const players = await page.evaluate(() => {
+      const playerElements = [...document.querySelectorAll("#roster tbody tr td:nth-child(2) a")];
+      return playerElements.map(player => {
+        const fullName = player.textContent.trim().replace(/\s+/g, '-');
+        return {
+          [fullName]: player.href.replace(".html", "/gamelog/2025")
+        };
+      });
+    });
 
     await page.close(); // Close the page after use
-    return playerURL;
+    return players;
 
   } catch (error) {
     console.error("Error in getPlayerGameLogUrl:", error);
@@ -42,12 +51,15 @@ const getPlayerGameLogUrl = async (browser, team, player) => {
   }
 };
 
+
+
 /**
  * Extracts specific stats from the player's game log page.
  * @param {puppeteer.Page} page - Puppeteer page instance.
  * @param {string} stat - The `data-stat` attribute to extract.
  * @returns {Promise<string[]>} - Extracted values as an array.
  */
+
 const extractStatGenLog = async (page, stat) => {
   return page.evaluate((stat) => {
     return [...document.querySelectorAll(`td[data-stat="${stat}"]`)].map(el => el.textContent.trim());
@@ -62,11 +74,25 @@ const extractStatGenLog = async (page, stat) => {
  * @param {string} Team - NBA team abbreviation.
  * @param {string} Player - Player's full name.
  */
-const processPlayer = async (browser, team, player) => {
+const processPlayer = async (browser, team, playerN) => {
   try {
-    const playerURL = await getPlayerGameLogUrl(browser, team, player);
+
+    const playerList = await getPlayerGameLogUrl(browser, team);
+
+    console.log(playerList)
+
+
+    //change to for each going through everyone one on the roaster 
+    // Find the object that contains the playerN key dynamically
+    const playerData = playerList.find(player => player[playerN]);
+    
+    let playerURL = playerData[playerN]; // Use bracket notation to access dynamic key
+
+
+    console.log(playerURL)
+
     if (!playerURL) {
-      console.error(`Player ${player} not found.`);
+      console.error(`Player ${playerN} not found.`);
       return null; // Return null to prevent further errors
     }
 
@@ -91,7 +117,7 @@ const processPlayer = async (browser, team, player) => {
         try {
           return await extractStatGenLog(page, stat) ?? null; // Avoid undefined values
         } catch (error) {
-          console.error(`Error extracting ${stat} for ${player}:`, error);
+          console.error(`Error extracting ${stat} for ${playerN}:`, error);
           return null;
         }
       })
@@ -99,7 +125,7 @@ const processPlayer = async (browser, team, player) => {
 
     // Ensure extractedStats is properly populated
     if (extractedStats.includes(undefined)) {
-      console.error(`Failed to extract stats for ${player}.`);
+      console.error(`Failed to extract stats for ${playerN}.`);
       await page.close();
       return null;
     }
@@ -112,7 +138,7 @@ const processPlayer = async (browser, team, player) => {
 
     // Clean data by filtering out invalid games
     if (!game_numbers || !Array.isArray(game_numbers)) {
-      console.error(`Invalid game numbers for ${player}`);
+      console.error(`Invalid game numbers for ${playerN}`);
       await page.close();
       return null;
     }
@@ -133,7 +159,7 @@ const processPlayer = async (browser, team, player) => {
         try {
           return await extractStatGenLog(page, stat) ?? null;
         } catch (error) {
-          console.error(`Error extracting ${stat} for ${player}:`, error);
+          console.error(`Error extracting ${stat} for ${playerN}:`, error);
           return null;
         }
       })
@@ -148,7 +174,7 @@ const processPlayer = async (browser, team, player) => {
     await page.close();
 
     return {
-      player,
+      playerN,
       team,
       pts, ast, trb, orb, drb, stl, blk, tov, pf, game_score,
       fga, fg3a, fta, fgPct, fg3Pct, ftPct,
@@ -158,7 +184,7 @@ const processPlayer = async (browser, team, player) => {
     };
 
   } catch (error) {
-    console.error(`Error processing player ${player}:`, error);
+    console.error(`Error processing player:`, error);
     return null;
   }
 };
@@ -167,31 +193,23 @@ const run = async () => {
   const browser = await launchBrowser();
 
   try {
-    const players = [
-      { team: "CHI", name: "LeBron James" },
-      { team: "LAL", name: "Dalton Knecht" }
-    ];
 
-    const playerStats = await Promise.all(
-      players.map(({ team, name }) => processPlayer(browser, team, name))
-    );
+  let a = await processPlayer(browser, "LAL", "LeBron-James")
+  
+  console.log(a.ast)
 
-    playerStats.forEach(stats => {
-      if (stats) {
-        console.log(`${stats.off_rtg}`);
-      } else {
-        console.log(`Failed to retrieve stats for a player.`);
-      }
-    });
-
+  
   } catch (error) {
     console.error("Error running script:", error);
   } finally {
     await browser.close();
   }
+
 };
 
 run();
+
+
 
 //get team def rating
 //add get roaster > do in get game function import both teams, then add injury variable which will remove a player and it will process both teams 
